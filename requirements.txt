@@ -1,0 +1,16 @@
+# Core deep learning
+torch>=2.2.0
+
+# Config parsing
+PyYAML>=6.0
+
+# Structured, validated outputs for the agentic layer
+pydantic>=2.6.0
+
+# Testing
+pytest>=8.0.0
+
+# TODO-EXTENSION-MARKER [LIVE_RETRIEVAL_DEPS]:
+# Uncomment when wiring up real search / reverse-image-search providers in
+# agents/agent_fact.py (see TODO-EXTENSION-MARKER comments in that file).
+# httpx>=0.27.0

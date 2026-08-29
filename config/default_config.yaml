@@ -1,0 +1,133 @@
+# =============================================================================
+# default_config.yaml
+# -----------------------------------------------------------------------------
+# Central configuration for the Multimodal AI Verification System.
+#
+# WHY A YAML CONFIG?
+#   Hard-coding hyperparameters inside Python modules makes experimentation
+#   and reproducibility painful. Centralising them in a single YAML file lets
+#   us version-control experiment settings, swap them via CLI flags (see
+#   main.py), and keeps the "what" (values) separate from the "how"
+#   (implementation in core/, cognitive/, agents/).
+# =============================================================================
+
+project:
+  name: "multimodal-ai-verifier"
+  seed: 42                       # Global RNG seed for reproducibility across
+                                  # torch, numpy, and python's random module.
+  device: "cuda"                 # "cuda" | "cpu" | "mps" -- resolved at
+                                  # runtime with a fallback to "cpu" if the
+                                  # requested backend is unavailable.
+
+# -----------------------------------------------------------------------------
+# CORE VISION MODEL (core/verifier_model.py, core/backbones.py)
+# -----------------------------------------------------------------------------
+vision_model:
+  image_size: 224                # Standard ImageNet-style square input.
+  patch_size: 16                 # Used by the mocked PVTv2 patch-embedding.
+  in_channels: 3
+  backbone:
+    coatnet:
+      # CoAtNet interleaves convolutional ("MBConv") stages with
+      # self-attention ("Transformer") stages. We mock this with a
+      # configurable channel progression.
+      stem_channels: 64
+      stage_channels: [96, 192, 384, 768]
+      stage_depths: [2, 2, 6, 2]
+    pvtv2:
+      # Pyramid Vision Transformer v2 -- progressively shrinks the spatial
+      # resolution while growing channel depth, similar to a CNN, but using
+      # spatial-reduction attention. Mocked here as a projection stack.
+      embed_dims: [64, 128, 320, 512]
+      num_heads: [1, 2, 5, 8]
+      sr_ratios: [8, 4, 2, 1]      # Spatial-reduction ratios per stage.
+  fusion:
+    branch_output_dim: 512        # Output dim of each of the two branches
+                                   # (GELU branch, ELU branch) before fusion.
+    fusion_strategy: "weighted_sum" # "concat" | "weighted_sum"
+    weighted_sum_alpha: 0.5       # alpha * branch_gelu + (1-alpha) * branch_elu
+                                   # Only used when fusion_strategy=weighted_sum.
+  classifier:
+    hidden_dim: 256
+    num_classes: 2                # 0 = Real, 1 = Synthetic/Fake
+    dropout: 0.3
+
+# -----------------------------------------------------------------------------
+# CROSS-MODAL ATTENTION (core/cross_attention.py)
+# -----------------------------------------------------------------------------
+cross_attention:
+  embed_dim: 512                  # Must match branch_output_dim / text embed dim
+  num_heads: 8
+  dropout: 0.1
+  # Direction of attention: which modality supplies the Query.
+  # "image_to_text" -> image asks questions of text (Q=image, K=V=text)
+  # "text_to_image" -> text asks questions of image (Q=text, K=V=image)
+  direction: "image_to_text"
+
+# -----------------------------------------------------------------------------
+# HR-MCP COGNITIVE FUSION (cognitive/hr_mcp_fusion.py)
+# -----------------------------------------------------------------------------
+hr_mcp:
+  visual_embed_dim: 512           # From a ViT-style encoder (mocked upstream).
+  text_embed_dim: 512             # From a BERT-style encoder (mocked upstream).
+  joint_dim: 1024                 # visual_embed_dim + text_embed_dim
+  sentiment_mlp:
+    hidden_dim: 2048
+    dropout: 0.5
+  propensity_heads:
+    # Each head is a 4-layer MLP: joint_dim -> 256 -> 128 -> 1
+    hidden_dims: [256, 128]
+    dropout: 0.3
+  composite_metrics:
+    # Trustworthiness = Belief - AIGC_Likelihood
+    # Impact = Belief + Dissemination_Propensity
+    clamp_min: -1.0
+    clamp_max: 1.0
+
+# -----------------------------------------------------------------------------
+# TRAINING
+# -----------------------------------------------------------------------------
+training:
+  batch_size: 32
+  epochs: 20
+  optimizer: "adamw"
+  learning_rate: 3.0e-4
+  weight_decay: 1.0e-2
+  lr_scheduler: "cosine"
+  warmup_epochs: 2
+  grad_clip_norm: 1.0
+  early_stopping_patience: 5
+  metrics: ["accuracy", "f1", "roc_auc"]
+
+# -----------------------------------------------------------------------------
+# AGENTIC LAYER (agents/agent_fact.py, agents/mcp_server.py)
+# -----------------------------------------------------------------------------
+agents:
+  mode: "evidence_bounded"        # "closed_book" | "evidence_bounded" | "open_web"
+  max_react_steps: 6              # Cap on ReAct think/act/observe loop iterations.
+  confidence_threshold: 0.6       # Below this, AgentFact emits "uncertain".
+  # TODO-EXTENSION-MARKER [SEARCH_API_KEYS]:
+  # Populate these via environment variables in production; never commit real
+  # keys to source control. See agents/agent_fact.py::_web_search_tool for the
+  # exact plug-in point.
+  search_providers:
+    serper:
+      enabled: false
+      api_key_env_var: "SERPER_API_KEY"
+      endpoint: "https://google.serper.dev/search"
+    google_vision:
+      enabled: false
+      api_key_env_var: "GVISION_API_KEY"
+      endpoint: "https://vision.googleapis.com/v1/images:annotate"
+  mcp_server:
+    host: "127.0.0.1"
+    port: 8765
+    transport: "stdio"            # "stdio" | "sse" -- see agents/mcp_server.py
+
+# -----------------------------------------------------------------------------
+# LOGGING
+# -----------------------------------------------------------------------------
+logging:
+  level: "INFO"
+  log_dir: "./logs"
+  log_predictions: true
