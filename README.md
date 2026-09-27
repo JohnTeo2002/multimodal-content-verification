@@ -55,6 +55,72 @@ multimodal_verifier/
 └── main.py                     # CLI pipeline runner (`--serve` for MCP mode)
 ```
 
+## End-to-end flow
+
+The project combines visual analysis, human-response modeling, and
+evidence-linked reasoning into one auditable verification pipeline:
+
+```mermaid
+flowchart LR
+   Input[Claim + media input]
+   Entry{Entry point}
+   CLI[main.py CLI]
+   MCP[MCP-style tool server]
+
+   Input --> Entry
+   Entry --> CLI
+   Entry --> MCP
+
+   subgraph Analysis[Verification analysis]
+      Vision[core/<br/>DualBranchVerifier]
+      Backbones[Mocked CoAtNet + PVTv2<br/>cross-modal attention]
+      Human[cognitive/<br/>HRMCPFusion]
+      Propensity[Human propensities<br/>Trustworthiness + Impact]
+      Agents[agents/<br/>AgentFact ReAct]
+      Evidence[Evidence search stubs<br/>and Pydantic schemas]
+
+      Vision --> Backbones
+      Human --> Propensity
+      Agents --> Evidence
+   end
+
+   CLI --> Vision
+   CLI --> Human
+   CLI --> Agents
+   MCP --> Vision
+   MCP --> Human
+   MCP --> Agents
+
+   Vision --> VisionResult[Vision verification<br/>probabilities]
+   Propensity --> HumanResult[Human-response<br/>composite metrics]
+   Agents --> Verdict[Auditable AgentFact<br/>verdict + citations]
+
+   VisionResult --> Output[Combined verification results]
+   HumanResult --> Output
+   Verdict --> Output
+```
+
+### Diagram box reference
+
+Each box above corresponds to the following implementation surface:
+
+| Diagram box | Relevant implementation |
+|---|---|
+| **Claim + media input** | [`main.py`](main.py): `build_arg_parser()` accepts `--claim` and `--config`; [`agents/mcp_server.py`](agents/mcp_server.py): `MCPServer.verify_media_claims()` accepts an image shape, claim, and optional `image_ref`, while `get_human_perceptions()` accepts visual and text embeddings. |
+| **Entry point** | [`main.py`](main.py): `main()` loads configuration, selects `--serve` or the one-shot pipeline, resolves the device with `resolve_device()`, and seeds PyTorch for reproducible demo output. |
+| **main.py CLI** | [`main.py`](main.py): `run_vision_pipeline()`, `run_cognitive_pipeline()`, and `run_agentic_pipeline()` construct the three pipelines and return serializable results. |
+| **MCP-style tool server** | [`agents/mcp_server.py`](agents/mcp_server.py): `MCPServer.__init__()` registers the tools; `register_tool()`, `list_tools()`, and `call_tool()` provide discovery and async dispatch; `run_stdio_stub()` supplies the offline transport loop. |
+| **core / DualBranchVerifier** | [`core/verifier_model.py`](core/verifier_model.py): `DualBranchVerifier` runs the GELU and ELU branches; `forward()` produces class logits, `fuse()` combines branch features, and `forward_with_features()` exposes intermediate features for inspection. |
+| **Mocked CoAtNet + PVTv2 / cross-modal attention** | [`core/backbones.py`](core/backbones.py): `CoAtNetBackbone.forward()` and `PVTv2Backbone.forward()` produce compact offline feature vectors; [`core/cross_attention.py`](core/cross_attention.py): `DirectionalCrossAttention.forward()` provides directional Q/K/V attention with residual normalization. [`core/activations.py`](core/activations.py) supplies `CustomGELU` and `CustomELU`. |
+| **cognitive / HRMCPFusion** | [`cognitive/hr_mcp_fusion.py`](cognitive/hr_mcp_fusion.py): `HRMCPFusion.forward()` concatenates visual/text embeddings, applies `_SentimentMLP`, fuses with `LayerNorm`, and runs the three `_PropensityHead` instances into an `HRMCPOutput`. |
+| **Human propensities / Trustworthiness + Impact** | [`cognitive/propensity.py`](cognitive/propensity.py): `PropensityClassifier.classify()` connects model output to `classify_propensity()`; `CompositeMetrics`, `TrustLevel`, and `ImpactLevel` hold the scores and labels. |
+| **agents / AgentFact ReAct** | [`agents/agent_fact.py`](agents/agent_fact.py): `AgentFact.verify_claim()` runs the Think/Act/Observe loop; `_search_preloaded_evidence()` searches bounded evidence, `_dispatch_action()` enforces `AgentMode`, and the web/reverse-image tool methods are deterministic stubs. `ReActStep` records the trace. |
+| **Evidence search stubs and Pydantic schemas** | [`agents/agent_fact.py`](agents/agent_fact.py) contains `_web_search_tool()` and `_reverse_image_search_tool()`; [`agents/schemas.py`](agents/schemas.py) defines `EvidenceItem`, `VerifiableFact`, `ExplainedPrediction`, and `VerdictLabel`, including grounded-citation validation. |
+| **Vision verification probabilities** | [`main.py`](main.py): `run_vision_pipeline()` applies `torch.softmax()` to `DualBranchVerifier` logits; [`agents/mcp_server.py`](agents/mcp_server.py): `verify_media_claims()` returns real/synthetic probabilities for async callers. Offline evaluation metrics are calculated by `compute_verifier_metrics()` in [`core/verifier_model.py`](core/verifier_model.py). |
+| **Human-response composite metrics** | [`main.py`](main.py): `run_cognitive_pipeline()` calls `PropensityClassifier`; [`agents/mcp_server.py`](agents/mcp_server.py): `get_human_perceptions()` performs the same operation asynchronously and returns `CompositeMetrics.as_dict()`. |
+| **Auditable AgentFact verdict + citations** | [`agents/agent_fact.py`](agents/agent_fact.py): `verify_claim()` builds the verdict and confidence heuristic; [`agents/schemas.py`](agents/schemas.py): `ExplainedPrediction` validates the final verdict, evidence pool, reasons, and citation grounding. |
+| **Combined verification results** | [`main.py`](main.py): `main()` prints the three JSON result blocks; [`agents/mcp_server.py`](agents/mcp_server.py): `call_tool()` wraps async tool results in an MCP-style `content` response with an `isError` flag. |
+
 ## Running the demo pipeline
 
 ```bash
