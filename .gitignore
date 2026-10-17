@@ -57,3 +57,5 @@ venv.bak/
 # IDEs and Editors
 .idea/
 .DS_Store
+
+issues.md
