@@ -3,19 +3,25 @@
     python main.py --claim "The photo was taken at the summit" \
         --evidence "Summit photo taken Monday" --scores 0.2 0.8 0.6
 
-This is keyword matching, not fact-checking: "supported" only means the
-evidence shares words with the claim. It cannot detect contradiction.
+This is keyword matching with negation heuristic and stop words filtering.
 """
 
 import argparse
 import json
 
 MAX_CLAIM_LENGTH = 500
+STOP_WORDS = {
+    "a", "an", "the", "and", "that", "have", "for", "with", "you", "this",
+    "but", "his", "from", "they", "say", "her", "she", "will", "one", "all",
+    "would", "at", "in", "on", "is", "was", "are", "it", "to", "of",
+}
+NEGATION = {"no", "not", "never", "false", "debunked", "refuted", "fake"}
 
 
 def words(text):
-    # shortcut: words of 3 letters or fewer are ignored, replace with real NLP if matching is too crude
-    return {w.lower().strip(".,!?\"'") for w in text.split() if len(w) > 3}
+    # shortcut: simple set of stop words, upgrade to a full NLP library if matching is too noisy
+    cleaned = (w.lower().strip(".,!?\"'") for w in text.split())
+    return {w for w in cleaned if w and w not in STOP_WORDS}
 
 
 def verify_claim(claim, evidence):
@@ -24,16 +30,25 @@ def verify_claim(claim, evidence):
         raise ValueError(f"claim must be 1-{MAX_CLAIM_LENGTH} characters and not blank")
 
     pool = {f"ev_{i}": snippet for i, snippet in enumerate(evidence)}
-    cited = [id for id, snippet in pool.items() if words(claim) & words(snippet)]
+    claim_words = words(claim)
+    cited = [id for id, snippet in pool.items() if claim_words & words(snippet)]
 
     # More matching evidence gives more confidence, capped so it never claims certainty.
     confidence = min(0.9, 0.3 + 0.2 * len(cited)) if cited else 0.0
+
+    # shortcut: simple negation check anywhere in cited snippet, upgrade to proximity/dependency parsing
+    is_negated = any(words(pool[cid]) & NEGATION for cid in cited)
+
     if not cited:
         verdict = "unverifiable"
+    elif is_negated:
+        verdict = "contradicted"
+        confidence = round(max(0.0, confidence - 0.4), 6)
     elif confidence < 0.6:
         verdict = "uncertain"
     else:
         verdict = "supported"
+
     return {"verdict": verdict, "confidence": confidence, "cited_evidence": cited, "evidence": pool}
 
 
@@ -67,6 +82,28 @@ def trust_and_impact(aigc, belief, dissemination):
     return {"trust": trust, "trust_level": trust_level, "impact": impact, "impact_level": impact_level}
 
 
+def reconcile(claim_check, human_response):
+    """Reconcile factual claim verification with human response perception metrics."""
+    # shortcut: rule-based reconciliation labels, upgrade to multi-objective composite scoring
+    verdict = claim_check["verdict"]
+    trust_level = human_response["trust_level"]
+    impact_level = human_response["impact_level"]
+
+    if verdict == "supported" and trust_level == "low_trust":
+        return "dangerous_disconnect"
+    if verdict == "contradicted":
+        if trust_level in ("high_trust", "suspicious") or impact_level == "viral_risk":
+            return "viral_misinformation"
+        return "debunked"
+    if trust_level == "suspicious" or impact_level == "viral_risk":
+        return "plausible_synthetic_viral"
+    if verdict == "supported":
+        return "grounded_truth"
+    if verdict == "unverifiable" and impact_level == "low_impact":
+        return "benign_hallucination"
+    return "unverified"
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawTextHelpFormatter)
     parser.add_argument("--claim", required=True)
@@ -75,9 +112,12 @@ def main():
     args = parser.parse_args()
 
     try:
-        result = {"claim_check": verify_claim(args.claim, args.evidence)}
+        check = verify_claim(args.claim, args.evidence)
+        result = {"claim_check": check}
         if args.scores:
-            result["human_response"] = trust_and_impact(*args.scores)
+            response = trust_and_impact(*args.scores)
+            result["human_response"] = response
+            result["reconciliation"] = reconcile(check, response)
     except ValueError as error:
         parser.error(str(error))
     print(json.dumps(result, indent=2))
