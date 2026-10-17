@@ -31,11 +31,28 @@ The application runs via a command-line interface (`main.py`) using Python's sta
    - Identifies which evidence snippets share matching words with the claim.
    - Calculates a confidence score based on the number of matching evidence sources (capped at `0.9`).
    - Assigns a verdict (`unverifiable`, `uncertain`, or `supported`) based on whether matches were found and the confidence level.
+      - unverifiable: No evidence snippets shared matching keywords with the claim (0 citations, confidence = 0.0).
+      - uncertain: Exactly 1 evidence snippet shared matching keywords, yielding low confidence (0.5, below the 0.6 threshold).
+      - supported: Two or more evidence snippets shared matching keywords, reaching a confidence of 0.7 or higher (formula: min(0.9, 0.3 + 0.2 *
+       count)).
+
 3. **Human Response Scoring (`trust_and_impact`):**
    - Validates that all three input scores are between `0` and `1`.
    - Calculates `trust` (`belief - aigc`) and `impact` (`belief + dissemination`).
+      - AIGC (Perceived AI generation)
+      - Belief (Perceived credibility)
+      - Dissemination (Likelihood to share)
    - Determines qualitative levels (e.g., `high_trust`, `suspicious`, `viral_risk`, `moderate_impact`).
 4. **Output:** Prints a formatted JSON object containing the results.
+
+The demo shows that truth value and virality/trust often diverge in AI-era media:
+
+| Scenario | Claim Verdict | Human Response | Real-World Meaning |
+| --- | --- | --- | --- |
+| Grounded Truth | supported | high_trust / high_impact | Legitimate, verifiable news accepted by the public. |
+| Plausible Synthetic Viral | uncertain or supported | suspicious / viral_risk | AI-generated content (e.g., deepfakes, hyper-realistic AI leaks) that spreads rapidly despite synthetic markers. |
+| Distrusted Fact | supported | low_trust | True claims that audiences reject because they look synthetic or counterintuitive. |
+| Benign Hallucination | unverifiable | low_trust / low_impact | Obvious falsehoods or noise that fail verification and fail to gain audience traction. |
 
 ---
 
@@ -172,3 +189,24 @@ pytest
 - **Keyword Matching Limitation:** Uses basic word intersection (`len(w) > 3`), meaning words with different contexts or negations may trigger a positive match.
 - **No Factual Ground Truth:** The tool does not connect to external databases, search engines, or real-world knowledge bases.
 - **Synthetic Scoring:** Human response metrics are purely arithmetic formulas and threshold rules, not actual telemetry or human survey data.
+
+---
+
+## 9. Running the Interactive UI Demo (React + FastAPI)
+
+This repository includes a modern React + TypeScript frontend and a FastAPI backend for interactive web demonstrations.
+
+### Starting the Backend API
+```bash
+python3 -m uvicorn backend.server:app --reload --port 8000
+```
+
+### Starting the Frontend Dev Server
+In a separate terminal window:
+```bash
+cd frontend
+npm install
+npm run dev
+```
+Then open `http://localhost:5173` in your browser to use the interactive UI dashboard.
+
