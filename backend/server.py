@@ -3,7 +3,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from main import trust_and_impact, verify_claim
+from main import reconcile, trust_and_impact, verify_claim
 
 app = FastAPI(
     title="Content Verification API",
@@ -34,11 +34,14 @@ def health_check():
 @app.post("/api/verify")
 def verify_content(payload: VerifyRequest):
     try:
-        result = {"claim_check": verify_claim(payload.claim, payload.evidence)}
+        check = verify_claim(payload.claim, payload.evidence)
+        result = {"claim_check": check}
         if payload.scores:
             if len(payload.scores) != 3:
                 raise ValueError("scores must contain exactly 3 values")
-            result["human_response"] = trust_and_impact(*payload.scores)
+            response = trust_and_impact(*payload.scores)
+            result["human_response"] = response
+            result["reconciliation"] = reconcile(check, response)
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
