@@ -27,23 +27,36 @@ The application runs via a command-line interface (`main.py`) using Python's sta
 
 1. **Input Parsing:** Receives a `--claim`, zero or more `--evidence` snippets, and optional `--scores`.
 2. **Claim Check (`verify_claim`):**
-   - Extracts words longer than 3 characters from both the claim and each evidence snippet (ignoring case and punctuation).
-   - Identifies which evidence snippets share matching words with the claim.
-   - Calculates a confidence score based on the number of matching evidence sources (capped at `0.9`).
-   - Assigns a verdict (`unverifiable`, `uncertain`, or `supported`) based on whether matches were found and the confidence level.
-      - unverifiable: No evidence snippets shared matching keywords with the claim (0 citations, confidence = 0.0).
-      - uncertain: Exactly 1 evidence snippet shared matching keywords, yielding low confidence (0.5, below the 0.6 threshold).
-      - supported: Two or more evidence snippets shared matching keywords, reaching a confidence of 0.7 or higher (formula: min(0.9, 0.3 + 0.2 *
-       count)).
+   - **Stop-Words Filtering:** Punctuation is stripped and high-frequency English function words (`STOP_WORDS`, e.g., "the", "and", "that", "is", "for") are eliminated, ensuring matching operates on informative content terms.
+   - **Keyword Matching:** Identifies which evidence snippets share content keywords with the claim.
+   - **Negation Detection:** Checks cited evidence snippets for negation and refutation markers (`NEGATION`, e.g., "no", "not", "never", "false", "debunked", "refuted", "fake").
+   - **Confidence & Verdict Determination:**
+     - `unverifiable`: No evidence snippets shared content keywords with the claim (0 citations, confidence = 0.0).
+     - `contradicted`: Matching evidence contains negation cues, signaling that the evidence directly refutes the claim (confidence downgraded by 0.4).
+     - `uncertain`: Exactly 1 evidence snippet matched without negation cues (confidence = 0.5, below the 0.6 threshold).
+     - `supported`: Two or more evidence snippets matched without negation cues (confidence >= 0.7; formula: `min(0.9, 0.3 + 0.2 * count)`).
+     - The formula min(0.9, 0.3 + 0.2 * count) calculates the confidence score for a supported claim based on the number of matching evidence snippets:
+        1. Base Confidence (0.3): The starting confidence score when at least one evidence snippet matches.
+        2. Incremental Scaling (+ 0.2 * count): Adds 0.2 confidence for every matching evidence snippet.
+        3. Ceiling Cap (min(0.9, ...)): Caps the maximum confidence at 0.9 so keyword overlap alone never claims absolute (100%) certainty.
 
 3. **Human Response Scoring (`trust_and_impact`):**
-   - Validates that all three input scores are between `0` and `1`.
-   - Calculates `trust` (`belief - aigc`) and `impact` (`belief + dissemination`).
-      - AIGC (Perceived AI generation)
-      - Belief (Perceived credibility)
-      - Dissemination (Likelihood to share)
-   - Determines qualitative levels (e.g., `high_trust`, `suspicious`, `viral_risk`, `moderate_impact`).
-4. **Output:** Prints a formatted JSON object containing the results.
+   - Validates that all three input scores are between `0` and `1`:
+     - **AIGC:** Perceived likelihood of AI generation / synthetic markers.
+     - **Belief:** Perceived audience credibility / acceptance.
+     - **Dissemination:** Likelihood of viral resharing / amplification.
+   - Calculates `trust` (`round(belief - aigc, 6)`) and `impact` (`round(belief + dissemination, 6)`).
+   - Assigns qualitative classifications (`high_trust`, `moderate_trust`, `low_trust`, `suspicious`, `viral_risk`, `high_impact`, `moderate_impact`, `low_impact`).
+   - **Trust Classifications (`trust_level`):**
+     1. `suspicious`: Triggered when `aigc >= 0.7` and `belief >= 0.7`, indicating highly convincing synthetic content.
+     2. `high_trust`: Net trust (`belief - aigc`) is `>= 0.5`.
+     3. `moderate_trust`: Net trust is `>= 0` and `< 0.5`.
+     4. `low_trust`: Net trust is `< 0`, meaning perceived AIGC outweighs audience belief.
+   - **Impact Classifications (`impact_level`):**
+     1. `viral_risk`: Triggered when `belief >= 0.7` and `dissemination >= 0.7`, indicating high belief and shareability.
+     2. `high_impact`: Total impact (`belief + dissemination`) is `>= 1.3`, unless already classified as `viral_risk`.
+     3. `moderate_impact`: Total impact is `>= 0.7` and `< 1.3`.
+     4. `low_impact`: Total impact is `< 0.7`.
 
 The demo shows that truth value and virality/trust often diverge in AI-era media:
 
