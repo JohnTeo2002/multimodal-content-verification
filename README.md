@@ -37,6 +37,10 @@ The application runs via a command-line interface (`main.py`) using Python's sta
      - `contradicted`: Matching evidence contains negation cues, signaling that the evidence directly refutes the claim (confidence downgraded by 0.4).
      - `uncertain`: Exactly 1 evidence snippet matched without negation cues (confidence = 0.5, below the 0.6 threshold).
      - `supported`: Two or more evidence snippets matched without negation cues (confidence >= 0.7; formula: `min(0.9, 0.3 + 0.2 * count)`).
+     - The formula min(0.9, 0.3 + 0.2 * count) calculates the confidence score for a supported claim based on the number of matching evidence snippets:
+        1. Base Confidence (0.3): The starting confidence score when at least one evidence snippet matches.
+        2. Incremental Scaling (+ 0.2 * count): Adds 0.2 confidence for every matching evidence snippet.
+        3. Ceiling Cap (min(0.9, ...)): Caps the maximum confidence at 0.9 so keyword overlap alone never claims absolute (100%) certainty.
 
 3. **Human Response Scoring (`trust_and_impact`):**
    - Validates that all three input scores are between `0` and `1`:
@@ -45,6 +49,16 @@ The application runs via a command-line interface (`main.py`) using Python's sta
      - **Dissemination:** Likelihood of viral resharing / amplification.
    - Calculates `trust` (`round(belief - aigc, 6)`) and `impact` (`round(belief + dissemination, 6)`).
    - Assigns qualitative classifications (`high_trust`, `moderate_trust`, `low_trust`, `suspicious`, `viral_risk`, `high_impact`, `moderate_impact`, `low_impact`).
+   - **Trust Classifications (`trust_level`):**
+     1. `suspicious`: Triggered when `aigc >= 0.7` and `belief >= 0.7`, indicating highly convincing synthetic content.
+     2. `high_trust`: Net trust (`belief - aigc`) is `>= 0.5`.
+     3. `moderate_trust`: Net trust is `>= 0` and `< 0.5`.
+     4. `low_trust`: Net trust is `< 0`, meaning perceived AIGC outweighs audience belief.
+   - **Impact Classifications (`impact_level`):**
+     1. `viral_risk`: Triggered when `belief >= 0.7` and `dissemination >= 0.7`, indicating high belief and shareability.
+     2. `high_impact`: Total impact (`belief + dissemination`) is `>= 1.3`, unless already classified as `viral_risk`.
+     3. `moderate_impact`: Total impact is `>= 0.7` and `< 1.3`.
+     4. `low_impact`: Total impact is `< 0.7`.
 
 4. **Reconciliation Analysis (`reconcile`):**
    - Combines objective claim verification (`verdict`) with subjective human response (`trust_level`, `impact_level`) to classify the content into real-world operational categories:
@@ -278,4 +292,3 @@ npm install
 npm run dev
 ```
 Then open `http://localhost:5173` in your browser to use the interactive UI dashboard.
-
