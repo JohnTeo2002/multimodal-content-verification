@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import './App.css';
 
 interface ClaimCheckResult {
-  verdict: 'supported' | 'uncertain' | 'unverifiable';
+  verdict: 'supported' | 'uncertain' | 'unverifiable' | 'contradicted';
   confidence: number;
   cited_evidence: string[];
   evidence: Record<string, string>;
@@ -18,6 +18,7 @@ interface HumanResponseResult {
 interface VerificationResponse {
   claim_check: ClaimCheckResult;
   human_response?: HumanResponseResult;
+  reconciliation?: string;
 }
 
 export default function App() {
@@ -313,6 +314,15 @@ export default function App() {
                       </span>
                     </div>
                   </div>
+                </div>
+              )}
+
+              {result.reconciliation && (
+                <div className="reconciliation-row">
+                  <span className="metric-label">Reconciliation Analysis:</span>
+                  <span className={`badge reconciliation-${result.reconciliation}`}>
+                    {result.reconciliation.replace(/_/g, ' ').toUpperCase()}
+                  </span>
                 </div>
               )}
             </div>
